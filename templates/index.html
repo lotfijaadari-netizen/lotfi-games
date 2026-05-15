@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Lotfi Games — Street Racer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Orbitron:wght@700;900&display=swap');
+:root {
+  --neon: #00f5ff; --red: #ff2d55; --yellow: #ffd60a;
+  --bg: #05050f; --road: #1a1a2e; --line: #ffffff22;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; font-family:'Rajdhani',sans-serif; overflow:hidden; }
+
+/* HUD */
+#hud { width:480px; display:flex; justify-content:space-between; align-items:center; padding:10px 5px; margin-bottom:6px; }
+.hud-box { background:#0a0a1f; border:1px solid #00f5ff22; border-radius:8px; padding:6px 14px; text-align:center; }
+.hud-label { font-size:0.55rem; color:#00f5ff88; letter-spacing:3px; font-family:'Orbitron'; }
+.hud-val { font-size:1.1rem; color:#00f5ff; font-family:'Orbitron'; font-weight:700; }
+#turbo-bar-wrap { width:120px; }
+#turbo-bar-bg { background:#111; border-radius:4px; height:8px; margin-top:4px; overflow:hidden; }
+#turbo-bar { height:8px; width:100%; background:linear-gradient(90deg,#ff2d55,#ffd60a); border-radius:4px; transition:width 0.1s; }
+
+/* Canvas wrapper */
+#wrap { position:relative; width:480px; height:600px; }
+canvas { display:block; border-radius:4px; box-shadow:0 0 60px #00f5ff22; }
+
+/* Overlay */
+#overlay { position:absolute; top:0; left:0; width:480px; height:600px; z-index:99; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; background:rgba(5,5,15,0.96); border-radius:4px; }
+.brand-tag { font-family:'Orbitron'; font-size:0.65rem; color:#00f5ff88; letter-spacing:8px; }
+.game-logo { font-family:'Orbitron'; font-size:3rem; font-weight:900; line-height:1; text-align:center; background:linear-gradient(135deg,#00f5ff,#ff2d55); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow:none; }
+.game-sub { font-size:0.7rem; color:#ffffff44; letter-spacing:5px; font-family:'Orbitron'; }
+.ctrl-panel { background:#0a0a1f; border:1px solid #00f5ff22; border-radius:12px; padding:16px 28px; text-align:center; font-size:0.85rem; color:#aaa; line-height:2.4; }
+.ctrl-panel b { color:#00f5ff; font-family:'Orbitron'; font-size:0.75rem; }
+.play-btn { padding:14px 55px; border:2px solid #00f5ff; background:transparent; color:#00f5ff; font-size:0.9rem; cursor:pointer; font-family:'Orbitron'; letter-spacing:4px; border-radius:6px; transition:all 0.3s; text-shadow:0 0 15px #00f5ff; box-shadow:0 0 30px #00f5ff33; }
+.play-btn:hover { background:#00f5ff15; box-shadow:0 0 50px #00f5ff55; transform:scale(1.04); }
+.copy { font-family:'Orbitron'; font-size:0.5rem; color:#ffffff15; letter-spacing:4px; }
+
+/* Flash */
+#flash { position:absolute; top:0; left:0; width:480px; height:600px; pointer-events:none; z-index:80; opacity:0; border-radius:4px; background:rgba(255,45,85,0.35); transition:opacity 0.1s; }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="hud-box"><div class="hud-label">SCORE</div><div class="hud-val" id="h-score">0</div></div>
+  <div class="hud-box"><div class="hud-label">MEILLEUR</div><div class="hud-val" id="h-best">0</div></div>
+  <div class="hud-box"><div class="hud-label">VITESSE</div><div class="hud-val" id="h-speed">0</div><div style="font-size:0.5rem;color:#ffffff44;font-family:Orbitron">KM/H</div></div>
+  <div class="hud-box" id="turbo-bar-wrap"><div class="hud-label">TURBO</div><div id="turbo-bar-bg"><div id="turbo-bar"></div></div></div>
+</div>
+
+<div id="wrap">
+  <canvas id="canvas" width="480" height="600"></canvas>
+  <div id="flash"></div>
+  <div id="overlay">
+    <div class="brand-tag">✦ LOTFI GAMES ✦</div>
+    <div class="game-logo">STREET<br>RACER</div>
+    <div class="game-sub">TURBO EDITION</div>
+    <div class="ctrl-panel">
+      <b>← →</b> ou <b>A D</b> — Changer de voie<br>
+      <b>ESPACE</b> — Turbo boost 🚀<br>
+      <b>Évite</b> les voitures ennemies !
+    </div>
+    <button class="play-btn" id="startBtn">▶ DÉMARRER</button>
+    <div class="copy">© LOTFI GAMES 2026</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = 480, H = 600;
+
+// ── Audio Engine (Web Audio API) ──────────────────────────────
+const AC = new (window.AudioContext || window.webkitAudioContext)();
+
+function playTone(freq, type, dur, vol=0.3, delay=0) {
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.connect(g); g.connect(AC.destination);
+  o.type = type; o.frequency.setValueAtTime(freq, AC.currentTime+delay);
+  g.gain.setValueAtTime(vol, AC.currentTime+delay);
+  g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime+delay+dur);
+  o.start(AC.currentTime+delay); o.stop(AC.currentTime+delay+dur);
+}
+
+function sfxEngine(on) {
+  if (!engineNode) return;
+  engineNode.frequency.setValueAtTime(on ? 80+gameSpeed*2 : 60, AC.currentTime);
+}
+
+let engineNode = null;
+function startEngineSound() {
+  if (engineNode) return;
+  engineNode = AC.createOscillator();
+  const g = AC.createGain(); g.gain.value = 0.06;
+  engineNode.type = 'sawtooth';
+  engineNode.frequency.value = 80;
+  engineNode.connect(g); g.connect(AC.destination);
+  engineNode.start();
+}
+function stopEngineSound() {
+  if (engineNode) { try{engineNode.stop();}catch(e){} engineNode=null; }
+}
+
+function sfxCrash() {
+  [100,80,60,40].forEach((f,i) => playTone(f,'square',0.15,0.4,i*0.05));
+  [300,200].forEach((f,i) => playTone(f,'sawtooth',0.1,0.3,i*0.08));
+}
+function sfxTurbo() {
+  [200,400,600,800].forEach((f,i) => playTone(f,'sine',0.12,0.25,i*0.06));
+}
+function sfxPass() {
+  playTone(440,'sine',0.05,0.1);
+  playTone(550,'sine',0.05,0.08,0.05);
+}
+function sfxLevelUp() {
+  [300,400,500,700].forEach((f,i) => playTone(f,'sine',0.15,0.3,i*0.08));
+}
+
+// ── Game State ────────────────────────────────────────────────
+const LANES = [100, 200, 300, 380]; // x centers
+const PLAYER_Y = H - 110;
+let player, enemies, particles, roadLines, score, best, gameSpeed, running, keys, turbo, turboFuel, spawnTimer, distanceTraveled, level, combo, lastShot;
+best = parseInt(localStorage.getItem('lg_best')||'0');
+document.getElementById('h-best').textContent = best;
+document.getElementById('startBtn').onclick = () => { AC.resume(); startGame(); };
+
+function startGame() {
+  document.getElementById('overlay').style.display = 'none';
+  player = { lane: 1, x: LANES[1], y: PLAYER_Y, w: 36, h: 64, targetX: LANES[1], moving: false, invincible: 0 };
+  enemies = []; particles = []; roadLines = [];
+  score = 0; gameSpeed = 4; turbo = false; turboFuel = 100;
+  spawnTimer = 0; distanceTraveled = 0; level = 1; combo = 1; keys = {};
+  for (let i = 0; i < 12; i++) roadLines.push({ y: i*(H/12), lane: Math.random() });
+  running = true; lastShot = 0;
+  startEngineSound();
+  cancelAnimationFrame(window._frame);
+  loop();
+}
+
+function loop() {
+  update(); draw();
+  if (running) window._frame = requestAnimationFrame(loop);
+}
+
+function addParticle(x, y, color, vx=0, vy=-3, count=6, size=4) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random()*Math.PI*2, s = Math.random()*3+1;
+    particles.push({ x, y, vx: Math.cos(a)*s+vx, vy: Math.sin(a)*s+vy, life:1, color, size: Math.random()*size+2 });
+  }
+}
+
+function update() {
+  const speed = turbo ? gameSpeed*1.8 : gameSpeed;
+
+  // Player lane movement
+  player.x += (player.targetX - player.x) * 0.18;
+
+  // Turbo
+  if (turbo) { turboFuel = Math.max(0, turboFuel-1.2); if (turboFuel<=0) turbo=false; }
+  else turboFuel = Math.min(100, turboFuel+0.25);
+  if (player.invincible>0) player.invincible--;
+
+  // Road lines
+  roadLines.forEach(l => { l.y += speed; if (l.y > H) l.y = -30; });
+
+  // Spawn enemies
+  spawnTimer++;
+  const spawnRate = Math.max(30, 90 - level*8);
+  if (spawnTimer > spawnRate) {
+    spawnTimer = 0;
+    const lane = Math.floor(Math.random()*4);
+    const colors = ['#ff2d55','#ffd60a','#30d158','#bf5af2','#ff9f0a'];
+    enemies.push({ x: LANES[lane], y: -80, w: 34, h: 60, lane, speed: (Math.random()*1.5+1), color: colors[Math.floor(Math.random()*colors.length)], passed: false });
+  }
+
+  // Update enemies
+  enemies.forEach(e => {
+    e.y += speed * (e.speed * 0.4);
+    // Score for passing
+    if (!e.passed && e.y > PLAYER_Y + 80) {
+      e.passed = true; score += 10 * combo;
+      sfxPass();
+      addParticle(e.x, e.y, '#00f5ff', 0, -2, 4, 3);
+    }
+    // Collision
+    if (player.invincible===0 &&
+        Math.abs(e.x - player.x) < 30 &&
+        Math.abs(e.y - player.y) < 55) {
+      sfxCrash();
+      addParticle(player.x, player.y, '#ff2d55', 0, 0, 20, 6);
+      flashScreen();
+      player.invincible = 90; lives--;
+      combo = 1;
+      if (lives <= 0) { gameOver(); return; }
+    }
+  });
+  enemies = enemies.filter(e => e.y < H+100);
+
+  // Distance & level
+  distanceTraveled += speed;
+  score += turbo ? 0.15 : 0.05;
+  if (distanceTraveled > 2000 * level) {
+    level++; gameSpeed += 0.4; sfxLevelUp();
+    addParticle(player.x, player.y, '#ffd60a', 0, -4, 15, 5);
+  }
+  if (score > best) { best = Math.floor(score); localStorage.setItem('lg_best', best); }
+
+  // Engine pitch
+  if (engineNode) engineNode.frequency.setValueAtTime(70 + speed*8, AC.currentTime);
+
+  // Turbo particles
+  if (turbo) addParticle(player.x, player.y+player.h/2, '#00f5ff', 0, 3, 3, 3);
+
+  // Update particles
+  particles.forEach(p => { p.x+=p.vx; p.y+=p.vy; p.vy+=0.15; p.life-=0.035; });
+  particles = particles.filter(p=>p.life>0);
+
+  // HUD
+  document.getElementById('h-score').textContent = Math.floor(score);
+  document.getElementById('h-best').textContent = best;
+  document.getElementById('h-speed').textContent = Math.floor(80 + gameSpeed*20 + (turbo?60:0));
+  document.getElementById('turbo-bar').style.width = turboFuel+'%';
+  document.getElementById('turbo-bar').style.background = turboFuel > 30 ? 'linear-gradient(90deg,#ff2d55,#ffd60a)' : '#ff2d5588';
+}
+
+let lives = 3;
+
+function flashScreen() {
+  const f = document.getElementById('flash');
+  f.style.opacity = '1';
+  setTimeout(() => f.style.opacity='0', 120);
+}
+
+function drawRoad() {
+  // Sky gradient
+  const sky = ctx.createLinearGradient(0,0,0,H*0.3);
+  sky.addColorStop(0,'#05050f'); sky.addColorStop(1,'#0a0a20');
+  ctx.fillStyle=sky; ctx.fillRect(0,0,W,H*0.3);
+
+  // Road
+  const road = ctx.createLinearGradient(0,H*0.3,0,H);
+  road.addColorStop(0,'#111122'); road.addColorStop(1,'#1a1a2e');
+  ctx.fillStyle=road; ctx.fillRect(0,H*0.3,W,H*0.7);
+
+  // Road edges glow
+  ctx.strokeStyle='#00f5ff33'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(60,0); ctx.lineTo(60,H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W-60,0); ctx.lineTo(W-60,H); ctx.stroke();
+
+  // Lane lines
+  roadLines.forEach(l => {
+    ctx.strokeStyle='#ffffff18'; ctx.lineWidth=2;
+    ctx.setLineDash([30,20]);
+    [160,240,320].forEach(lx => {
+      ctx.beginPath(); ctx.moveTo(lx, l.y); ctx.lineTo(lx, l.y+25); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  });
+
+  // Speed lines (turbo effect)
+  if (turbo) {
+    ctx.strokeStyle='rgba(0,245,255,0.15)'; ctx.lineWidth=1;
+    for (let i=0;i<12;i++) {
+      const x = 70+Math.random()*340, y = Math.random()*H;
+      ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,y+40+Math.random()*60); ctx.stroke();
+    }
+  }
+}
+
+function drawCar(x, y, w, h, color, isPlayer=false, invincible=0) {
+  if (isPlayer && invincible>0 && Math.floor(invincible/8)%2===1) return;
+  ctx.save();
+  // Body
+  ctx.shadowColor = isPlayer ? '#00f5ff' : color;
+  ctx.shadowBlur = isPlayer ? 20 : 12;
+  // Main body
+  ctx.fillStyle = isPlayer ? '#0a1628' : '#1a1a2e';
+  ctx.beginPath(); ctx.roundRect(x-w/2, y-h/2, w, h, 6); ctx.fill();
+  // Color stripe
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.roundRect(x-w/2+3, y-h/2+8, w-6, h-16, 4); ctx.fill();
+  // Windshield
+  ctx.fillStyle = isPlayer ? '#00f5ff44' : '#ffffff22';
+  ctx.beginPath(); ctx.roundRect(x-w/2+5, y-h/2+10, w-10, h*0.28, 4); ctx.fill();
+  // Wheels
+  ctx.fillStyle='#111';
+  [[-w/2-2, -h/2+8],[w/2-4,-h/2+8],[-w/2-2,h/2-14],[w/2-4,h/2-14]].forEach(([dx,dy]) => {
+    ctx.beginPath(); ctx.roundRect(x+dx, y+dy, 7, 14, 2); ctx.fill();
+  });
+  // Headlights / taillights
+  if (isPlayer) {
+    ctx.fillStyle='#00f5ffcc';
+    ctx.beginPath(); ctx.arc(x-w/2+5, y-h/2+5, 4, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+w/2-5, y-h/2+5, 4, 0, Math.PI*2); ctx.fill();
+    // Engine glow bottom
+    ctx.fillStyle='rgba(0,245,255,0.25)';
+    ctx.beginPath(); ctx.ellipse(x, y+h/2+6, 14, 6, 0, 0, Math.PI*2); ctx.fill();
+  } else {
+    ctx.fillStyle='#ff2d55cc';
+    ctx.beginPath(); ctx.arc(x-w/2+5, y+h/2-6, 4, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+w/2-5, y+h/2-6, 4, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.shadowBlur=0; ctx.restore();
+}
+
+function draw() {
+  ctx.clearRect(0,0,W,H);
+  drawRoad();
+
+  // Particles (behind cars)
+  particles.forEach(p => {
+    ctx.globalAlpha=p.life;
+    ctx.fillStyle=p.color;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); ctx.fill();
+  }); ctx.globalAlpha=1;
+
+  // Enemies
+  enemies.forEach(e => drawCar(e.x, e.y, e.w, e.h, e.color));
+
+  // Player
+  drawCar(player.x, player.y, player.w, player.h, '#00f5ff', true, player.invincible);
+
+  // Lives
+  ctx.font='18px Arial'; ctx.textAlign='left';
+  for (let i=0;i<lives;i++) { ctx.fillText('❤️', 10+i*24, 30); }
+
+  // Level badge
+  ctx.fillStyle='#00f5ff22'; ctx.beginPath(); ctx.roundRect(W-90,8,80,26,6); ctx.fill();
+  ctx.fillStyle='#00f5ff'; ctx.font='bold 0.7rem Orbitron,monospace'; ctx.textAlign='center';
+  ctx.fillText('NIVEAU '+level, W-50, 26);
+
+  // Turbo active label
+  if (turbo) {
+    ctx.fillStyle='#ffd60a'; ctx.shadowColor='#ffd60a'; ctx.shadowBlur=20;
+    ctx.font='bold 1rem Orbitron,monospace'; ctx.textAlign='center';
+    ctx.fillText('⚡ TURBO ⚡', W/2, 50);
+    ctx.shadowBlur=0;
+  }
+}
+
+function gameOver() {
+  running=false; stopEngineSound();
+  ctx.fillStyle='rgba(5,5,15,0.88)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  ctx.fillStyle='#ff2d55'; ctx.shadowColor='#ff2d55'; ctx.shadowBlur=30;
+  ctx.font='bold 2.8rem Orbitron,monospace'; ctx.fillText('GAME OVER',W/2,H/2-70);
+  ctx.shadowBlur=0;
+  ctx.fillStyle='#00f5ff'; ctx.font='1rem Orbitron,monospace';
+  ctx.fillText('SCORE : '+Math.floor(score),W/2,H/2-20);
+  ctx.fillStyle='#ffd60a'; ctx.font='0.75rem Orbitron,monospace';
+  ctx.fillText('MEILLEUR : '+best,W/2,H/2+18);
+  ctx.fillStyle='#ffffff44'; ctx.font='0.65rem Orbitron,monospace';
+  ctx.fillText('ESPACE pour rejouer',W/2,H/2+60);
+  ctx.fillStyle='#ffffff11'; ctx.font='0.5rem Orbitron,monospace';
+  ctx.fillText('© LOTFI GAMES 2026',W/2,H-20);
+}
+
+document.addEventListener('keydown', e => {
+  keys[e.code]=true;
+  if (!running && e.code==='Space') { lives=3; startGame(); return; }
+  if (!running) return;
+  if ((e.code==='ArrowLeft'||e.code==='KeyA') && player.lane>0) {
+    player.lane--; player.targetX=LANES[player.lane];
+    addParticle(player.x, player.y, '#00f5ff33',2,0,3,2);
+  }
+  if ((e.code==='ArrowRight'||e.code==='KeyD') && player.lane<3) {
+    player.lane++; player.targetX=LANES[player.lane];
+    addParticle(player.x, player.y, '#00f5ff33',-2,0,3,2);
+  }
+  if (e.code==='Space' && turboFuel>20 && !turbo) {
+    turbo=true; sfxTurbo();
+  }
+  e.preventDefault();
+});
+document.addEventListener('keyup', e => keys[e.code]=false);
+</script>
+</body>
+</html>
